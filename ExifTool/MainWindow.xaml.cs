@@ -1,25 +1,41 @@
 ﻿using ExifLib;
 using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 
 namespace ExifTool
 {
-    /*
-        1 = Horizontal (normal) 
-        2 = Mirror horizontal 
-        3 = Rotate 180 
-        4 = Mirror vertical 
-        5 = Mirror horizontal and rotate 270 CW 
-        6 = Rotate 90 CW 
-        7 = Mirror horizontal and rotate 90 CW 
-        8 = Rotate 270 CW
-    */
     public partial class MainWindow
     {
-        protected List<FileInfo> Files { get; set; }
+        /*
+            1 = Horizontal (normal) 
+            2 = Mirror horizontal 
+            3 = Rotate 180 
+            4 = Mirror vertical 
+            5 = Mirror horizontal and rotate 270 CW 
+            6 = Rotate 90 CW 
+            7 = Mirror horizontal and rotate 90 CW 
+            8 = Rotate 270 CW
+        */
+        protected enum ExifOrientation
+        {
+            None,
+            Normal,
+            MirrorHorizontal,
+            Rotate180,
+            MirrorVertical,
+            MirrorHorizontalAndRotate270,
+            Rotate90,
+            MirrorHorizontalAndRotate90,
+            Rotate270
+        }
+
+        protected List<FileSystemInfo> FilingList { get; set; }
 
         public MainWindow()
         {
@@ -36,20 +52,65 @@ namespace ExifTool
 
         private void Run()
         {
-            if (Files?.Count > 0)
+            var files = new List<FileInfo>();
+
+            foreach (var filingInfo in FilingList)
             {
-                foreach (var file in Files)
+                if (filingInfo is DirectoryInfo)
+                {
+                    var directory = filingInfo as DirectoryInfo;
+
+                    files.AddRange(directory.GetFiles("*.jpg"));
+                    files.AddRange(directory.GetFiles("*.jpeg"));
+                }
+                else if (filingInfo is FileInfo)
+                {
+                    files.Add(filingInfo as FileInfo);
+                }
+            }
+
+            if (files?.Count > 0)
+            {
+                var codecInfo = ImageCodecInfo.GetImageEncoders().Where(e => e.MimeType == "image/jpeg").FirstOrDefault();
+                var encoderInfo = new EncoderParameters
+                {
+                    Param = new[]
+                    {
+                        new EncoderParameter(Encoder.Quality, 100L)
+                    }
+                };
+
+                foreach (var file in files)
                 {
                     try
                     {
+                        ushort orientation = 0;
+
                         using (var reader = new ExifReader(file.FullName))
                         {
-                            ushort orientation;
-
                             if (reader.GetTagValue(ExifTags.Orientation, out orientation))
                             {
                                 Log($"{file.FullName} : {orientation}");
                             }
+                        }
+
+                        using (var image = Image.FromFile(file.FullName))
+                        {
+                            switch ((ExifOrientation)orientation)
+                            {
+                                case ExifOrientation.Rotate90: image.RotateFlip(RotateFlipType.Rotate90FlipNone); break;
+                                case ExifOrientation.Rotate180: image.RotateFlip(RotateFlipType.Rotate180FlipNone); break;
+                                case ExifOrientation.Rotate270: image.RotateFlip(RotateFlipType.Rotate270FlipNone); break;
+
+                                case ExifOrientation.MirrorHorizontal: image.RotateFlip(RotateFlipType.RotateNoneFlipX); break;
+                                case ExifOrientation.MirrorHorizontalAndRotate90: image.RotateFlip(RotateFlipType.Rotate90FlipX); break;
+                                case ExifOrientation.MirrorHorizontalAndRotate270: image.RotateFlip(RotateFlipType.Rotate270FlipX); break;
+
+                                case ExifOrientation.MirrorVertical: image.RotateFlip(RotateFlipType.RotateNoneFlipY); break;
+                            }
+
+                            image.RemovePropertyItem(0x0112);
+                            image.Save(file.FullName, codecInfo, encoderInfo);
                         }
                     }
                     catch (ExifLibException ex)
@@ -84,11 +145,11 @@ namespace ExifTool
             {
                 tbxLocation.Text = fileDialog.FileName;
 
-                Files = new List<FileInfo>();
+                FilingList = new List<FileSystemInfo>();
 
                 foreach (var path in fileDialog.FileNames)
                 {
-                    Files.Add(new FileInfo(path));
+                    FilingList.Add(new FileInfo(path));
                 }
             }
         }
@@ -106,12 +167,9 @@ namespace ExifTool
 
                     if (!string.IsNullOrWhiteSpace(path))
                     {
-                        var directory = new DirectoryInfo(path);
+                        FilingList = new List<FileSystemInfo>();
 
-                        Files = new List<FileInfo>();
-
-                        Files.AddRange(directory.GetFiles("*.jpg"));
-                        Files.AddRange(directory.GetFiles("*.jpeg"));
+                        FilingList.Add(new DirectoryInfo(path));
                     }
                 }
             }
